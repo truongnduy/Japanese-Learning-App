@@ -1,0 +1,998 @@
+openapi: 3.0.3
+info:
+  title: Japanese Learning API
+  version: v1
+  description: |
+    Backend RESTful API for the Japanese Learning application (Flutter client).
+    Built with Ruby on Rails 8 and MongoDB (Mongoid ODM).
+    Includes JWT authentication, lesson management, vocabulary with Kanji stroke details,
+    spaced-repetition study tracking, and automated quiz evaluation.
+servers:
+  - url: http://localhost:3000
+    description: Local Development Server
+  - url: http://10.0.2.2:3000
+    description: Android Emulator Host Address
+
+tags:
+  - name: Authentication
+    description: User registration, login, and profile with JWT
+  - name: Lessons
+    description: Lessons by JLPT level (N5, N4, etc.), words, and quiz questions
+  - name: Words
+    description: Vocabulary, Kanji stroke order data, and study progress tracking
+  - name: Quiz
+    description: Quiz submission, instant grading, and attempt history
+  - name: Progress
+    description: Learning statistics and dashboard metrics
+
+paths:
+  /api/v1/auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: Register a new user
+      description: Create a new student account and return a JWT access token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - password
+              properties:
+                name:
+                  type: string
+                  example: "Nguyễn Văn A"
+                email:
+                  type: string
+                  format: email
+                  example: "student@example.com"
+                password:
+                  type: string
+                  format: password
+                  example: "password123"
+                password_confirmation:
+                  type: string
+                  example: "password123"
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate with email and password to receive a JWT token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "student@example.com"
+                password:
+                  type: string
+                  format: password
+                  example: "password123"
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessResponse'
+        '401':
+          description: Invalid email or password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current user profile
+      description: Return profile info and basic study statistics for the authenticated user.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  user:
+                    $ref: '#/components/schemas/User'
+                  statistics:
+                    type: object
+                    properties:
+                      words_studied_count:
+                        type: integer
+                        example: 12
+                      quizzes_taken_count:
+                        type: integer
+                        example: 3
+                      average_quiz_score:
+                        type: number
+                        example: 85.5
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/lessons:
+    get:
+      tags:
+        - Lessons
+      summary: List all lessons
+      description: Retrieve lessons with optional filtering by JLPT level and keyword search.
+      parameters:
+        - name: level
+          in: query
+          description: Filter by JLPT level (e.g. N5, N4, N3, N2, N1)
+          schema:
+            type: string
+            enum: [N5, N4, N3, N2, N1]
+            example: N5
+        - name: query
+          in: query
+          description: Search lessons by title
+          schema:
+            type: string
+            example: "Chào hỏi"
+        - name: page
+          in: query
+          description: Page number (starts at 1)
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          description: Items per page (default 20, max 100)
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of lessons
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  total_count:
+                    type: integer
+                    example: 10
+                  page:
+                    type: integer
+                    example: 1
+                  per_page:
+                    type: integer
+                    example: 20
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Lesson'
+
+    post:
+      tags:
+        - Lessons
+      summary: Create a new lesson
+      description: Create a new lesson (requires authentication).
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+                - level
+              properties:
+                lesson:
+                  type: object
+                  required:
+                    - title
+                    - level
+                  properties:
+                    title:
+                      type: string
+                      example: "Bài 4: Giao thông & Đi lại"
+                    description:
+                      type: string
+                      example: "Học từ vựng về ga tàu, xe buýt, phương tiện đi lại."
+                    level:
+                      type: string
+                      enum: [N5, N4, N3, N2, N1]
+                      example: "N5"
+                    order:
+                      type: integer
+                      example: 4
+      responses:
+        '201':
+          description: Lesson created successfully
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/lessons/{id}:
+    get:
+      tags:
+        - Lessons
+      summary: Get lesson detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Lesson MongoDB ID
+          schema:
+            type: string
+            example: "6ab4829a3aaab6ebb0687339"
+      responses:
+        '200':
+          description: Lesson detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  data:
+                    $ref: '#/components/schemas/Lesson'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/lessons/{lesson_id}/words:
+    get:
+      tags:
+        - Lessons
+      summary: Get all words in a lesson
+      description: Returns vocabulary list for the lesson. If Authorization header is provided, includes `is_studied` status for current user.
+      parameters:
+        - name: lesson_id
+          in: path
+          required: true
+          description: Lesson MongoDB ID
+          schema:
+            type: string
+            example: "6ab4829a3aaab6ebb0687339"
+      security:
+        - BearerAuth: []
+        - {}
+      responses:
+        '200':
+          description: Vocabulary list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  lesson_id:
+                    type: string
+                    example: "6ab4829a3aaab6ebb0687339"
+                  lesson_title:
+                    type: string
+                    example: "Bài 1: Giới thiệu bản thân & Chào hỏi"
+                  total_words:
+                    type: integer
+                    example: 4
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Word'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/lessons/{lesson_id}/quiz_questions:
+    get:
+      tags:
+        - Lessons
+      summary: Get quiz questions for a lesson
+      description: Returns list of questions for the lesson test. Correct answers and explanations are safely omitted so students cannot inspect them.
+      parameters:
+        - name: lesson_id
+          in: path
+          required: true
+          description: Lesson MongoDB ID
+          schema:
+            type: string
+            example: "6ab4829a3aaab6ebb0687339"
+      responses:
+        '200':
+          description: List of safe quiz questions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  lesson_id:
+                    type: string
+                    example: "6ab4829a3aaab6ebb0687339"
+                  lesson_title:
+                    type: string
+                    example: "Bài 1: Giới thiệu bản thân & Chào hỏi"
+                  total_questions:
+                    type: integer
+                    example: 3
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/QuizQuestionSafe'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/words/{id}:
+    get:
+      tags:
+        - Words
+      summary: Get word detail with Kanji stroke order
+      description: Returns detailed word info including embedded KanjiStroke SVG paths.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Word MongoDB ID
+          schema:
+            type: string
+            example: "6ab4829b3aaab6ebb068733c"
+      responses:
+        '200':
+          description: Word detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  data:
+                    $ref: '#/components/schemas/Word'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/words/{word_id}/study:
+    post:
+      tags:
+        - Words
+      summary: Track word study progress
+      description: Records that the user has reviewed/studied this word. Updates proficiency level and spaced-repetition count.
+      parameters:
+        - name: word_id
+          in: path
+          required: true
+          description: Word MongoDB ID
+          schema:
+            type: string
+            example: "6ab4829b3aaab6ebb068733c"
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Study progress recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "Word review recorded"
+                  data:
+                    $ref: '#/components/schemas/UserWordProgress'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/words:
+    post:
+      tags:
+        - Words
+      summary: Create a new word
+      description: Create a vocabulary word with optional embedded Kanji strokes.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - kanji
+                - vietnamese_meaning
+                - difficulty_level
+              properties:
+                word:
+                  type: object
+                  required:
+                    - kanji
+                    - vietnamese_meaning
+                    - difficulty_level
+                  properties:
+                    kanji:
+                      type: string
+                      example: "木"
+                    romaji:
+                      type: string
+                      example: "ki / moku"
+                    hiragana:
+                      type: string
+                      example: "き"
+                    vietnamese_meaning:
+                      type: string
+                      example: "Cây, gỗ"
+                    difficulty_level:
+                      type: integer
+                      minimum: 1
+                      maximum: 5
+                      example: 1
+                    example_sentence:
+                      type: string
+                      example: "公園に大きな木があります。"
+                    example_meaning:
+                      type: string
+                      example: "Trong công viên có một cái cây to."
+                    lesson_id:
+                      type: string
+                      example: "6ab4829a3aaab6ebb0687339"
+                kanji_strokes:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/KanjiStroke'
+      responses:
+        '201':
+          description: Word created successfully
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/quiz/submit:
+    post:
+      tags:
+        - Quiz
+      summary: Submit quiz answers and get instant grading
+      description: Evaluates submitted answers against correct answers in the database, saves a QuizAttempt record, and returns detailed question-by-question feedback.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - lesson_id
+                - answers
+              properties:
+                lesson_id:
+                  type: string
+                  example: "6ab4829a3aaab6ebb0687339"
+                answers:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - question_id
+                      - selected_answer
+                    properties:
+                      question_id:
+                        type: string
+                        example: "6ab4829b3aaab6ebb0687340"
+                      selected_answer:
+                        type: string
+                        example: "C"
+      responses:
+        '200':
+          description: Quiz evaluated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuizSubmissionResult'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/quiz/history:
+    get:
+      tags:
+        - Quiz
+      summary: Get user's quiz attempt history
+      description: List past quiz attempts with scores and timestamps.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 15
+      responses:
+        '200':
+          description: Quiz attempt history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  total_count:
+                    type: integer
+                    example: 5
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/QuizAttempt'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/quiz/attempts/{id}:
+    get:
+      tags:
+        - Quiz
+      summary: Get details of a single quiz attempt
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "6ab482f984b82cdc7c91b0ec"
+      responses:
+        '200':
+          description: Attempt detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  data:
+                    $ref: '#/components/schemas/QuizAttempt'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/progress/summary:
+    get:
+      tags:
+        - Progress
+      summary: Get comprehensive learning progress summary
+      description: Provides dashboard metrics including total studied words, memorized words, quiz average, and recent activities.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Progress statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  data:
+                    type: object
+                    properties:
+                      study_stats:
+                        type: object
+                        properties:
+                          total_studied_words:
+                            type: integer
+                            example: 25
+                          memorized_words:
+                            type: integer
+                            example: 18
+                          learning_in_progress:
+                            type: integer
+                            example: 7
+                      quiz_stats:
+                        type: object
+                        properties:
+                          total_quizzes_taken:
+                            type: integer
+                            example: 6
+                          average_score:
+                            type: number
+                            example: 92.5
+                          passed_quizzes_count:
+                            type: integer
+                            example: 5
+                          pass_rate:
+                            type: number
+                            example: 83.3
+                      recent_studied_words:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/UserWordProgress'
+                      recent_quiz_attempts:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/QuizAttempt'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Enter your JWT token obtained from /api/v1/auth/login or /api/v1/auth/register."
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "6ab4829a3aaab6ebb0687338"
+        name:
+          type: string
+          example: "Nguyễn Văn A"
+        email:
+          type: string
+          example: "student@example.com"
+        role:
+          type: string
+          example: "student"
+        created_at:
+          type: string
+          format: date-time
+
+    AuthSuccessResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: "Login successful"
+        token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiNmFiNDgy..."
+        user:
+          $ref: '#/components/schemas/User'
+
+    Lesson:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "6ab4829a3aaab6ebb0687339"
+        title:
+          type: string
+          example: "Bài 1: Giới thiệu bản thân & Chào hỏi"
+        description:
+          type: string
+          example: "Làm quen với các từ vựng chào hỏi, xưng hô cơ bản."
+        level:
+          type: string
+          example: "N5"
+        order:
+          type: integer
+          example: 1
+        total_words:
+          type: integer
+          example: 4
+        total_questions:
+          type: integer
+          example: 3
+        created_at:
+          type: string
+          format: date-time
+
+    Word:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "6ab4829b3aaab6ebb068733c"
+        lesson_id:
+          type: string
+          example: "6ab4829a3aaab6ebb0687339"
+        kanji:
+          type: string
+          example: "人"
+        romaji:
+          type: string
+          example: "hito / jin"
+        hiragana:
+          type: string
+          example: "ひと"
+        vietnamese_meaning:
+          type: string
+          example: "Người"
+        meaning:
+          type: string
+          example: "Người"
+        difficulty_level:
+          type: integer
+          example: 1
+        example_sentence:
+          type: string
+          example: "あの人は日本人です。"
+        example_meaning:
+          type: string
+          example: "Người kia là người Nhật."
+        audio_url:
+          type: string
+          nullable: true
+        is_studied:
+          type: boolean
+          example: false
+        kanji_strokes:
+          type: array
+          items:
+            $ref: '#/components/schemas/KanjiStroke'
+
+    KanjiStroke:
+      type: object
+      properties:
+        id:
+          type: string
+        stroke_number:
+          type: integer
+          example: 1
+        stroke_order:
+          type: integer
+          example: 1
+        stroke_type:
+          type: string
+          example: "slant_left"
+        svg_path:
+          type: string
+          example: "M 50,20 Q 30,60 15,90"
+        direction:
+          type: string
+          example: "top_to_bottom_left"
+
+    QuizQuestionSafe:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "6ab4829b3aaab6ebb0687340"
+        lesson_id:
+          type: string
+          example: "6ab4829a3aaab6ebb0687339"
+        question_text:
+          type: string
+          example: "Chữ Hán '人' có nghĩa là gì?"
+        question_type:
+          type: string
+          example: "multiple_choice"
+        options:
+          type: array
+          items:
+            type: string
+          example: ["A. Sách", "B. Mặt trời", "C. Người", "D. Nước"]
+        points:
+          type: integer
+          example: 10
+
+    UserWordProgress:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "6ab4829b3aaab6ebb0687344"
+        user_id:
+          type: string
+        word_id:
+          type: string
+        word_kanji:
+          type: string
+          example: "人"
+        word_meaning:
+          type: string
+          example: "Người"
+        studied_at:
+          type: string
+          format: date-time
+        proficiency_level:
+          type: integer
+          example: 3
+        review_count:
+          type: integer
+          example: 4
+        memorized:
+          type: boolean
+          example: false
+
+    QuizSubmissionResult:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: "Quiz submitted and evaluated successfully"
+        quiz_attempt_id:
+          type: string
+          example: "6ab482f984b82cdc7c91b0ec"
+        lesson_id:
+          type: string
+          example: "6ab4829a3aaab6ebb0687339"
+        lesson_title:
+          type: string
+          example: "Bài 1: Giới thiệu bản thân & Chào hỏi"
+        score:
+          type: number
+          example: 100.0
+        earned_points:
+          type: integer
+          example: 30
+        total_points:
+          type: integer
+          example: 30
+        correct_count:
+          type: integer
+          example: 3
+        total_questions:
+          type: integer
+          example: 3
+        passed:
+          type: boolean
+          example: true
+        submitted_at:
+          type: string
+          format: date-time
+        feedback:
+          type: array
+          items:
+            type: object
+            properties:
+              question_id:
+                type: string
+              question_text:
+                type: string
+              selected_answer:
+                type: string
+              is_correct:
+                type: boolean
+              correct_answer:
+                type: string
+              explanation:
+                type: string
+              points_awarded:
+                type: integer
+
+    QuizAttempt:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "6ab482f984b82cdc7c91b0ec"
+        user_id:
+          type: string
+        lesson_id:
+          type: string
+        lesson_title:
+          type: string
+        score:
+          type: number
+          example: 100.0
+        earned_points:
+          type: integer
+        total_points:
+          type: integer
+        total_questions:
+          type: integer
+        correct_count:
+          type: integer
+        passed:
+          type: boolean
+        answers:
+          type: array
+          items:
+            type: object
+        created_at:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 401
+        error:
+          type: string
+          example: "Unauthorized"
+        message:
+          type: string
+          example: "Invalid email or password"
+
+    ValidationErrorResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 422
+        error:
+          type: string
+          example: "Validation Failed"
+        errors:
+          type: array
+          items:
+            type: string
+          example: ["Email has already been taken"]
+
+  responses:
+    UnauthorizedError:
+      description: Authentication failed or token missing
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
